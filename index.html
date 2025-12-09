@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Advanced Number System Simulator</title>
+<style>
+  :root{
+    --bg1:#1e003c;
+    --bg2:#5b1aa7;
+    --card:#f4f4f4ee;
+    --accent:#f779e8;
+    --muted:#f3e8ff;
+    --step-bg:#f7f0ff;
+    --btn:#7c3aed;
+    --btn-hover:#e41dc0;
+  }
+  body{
+    margin:0;
+    font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+    background: linear-gradient(135deg,var(--bg1),var(--bg2));
+    color:#1a1a1a;
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    padding:48px 12px;
+    min-height:100vh;
+  }
+  .card{
+    width:760px;
+    background:var(--card);
+    border-radius:14px;
+    box-shadow:0 10px 30px rgba(10,6,36,0.45);
+    padding:22px;
+  }
+  h1{margin:0 0 8px 0; font-size:20px; color:#240046;}
+  .row{display:flex; gap:12px; align-items:center; margin:10px 0;}
+  label{font-size:13px; color:#3b3054;}
+  select,input{padding:10px 12px; border-radius:8px; border:1px solid #e6dfff; font-size:14px; width:100%;}
+  input[type="text"]{box-sizing:border-box;}
+  .left{flex:1}
+  .small{width:160px}
+  button{
+    background:var(--btn);
+    color:white;
+    border:none;
+    padding:10px 14px;
+    border-radius:8px;
+    cursor:pointer;
+    font-weight:600;
+  }
+  button:hover{background:var(--btn-hover)}
+  .results{
+    margin-top:18px;
+    background:var(--step-bg);
+    border-radius:10px;
+    padding:14px;
+    max-height:420px;
+    overflow:auto;
+    border:1px solid #eadaff;
+  }
+  .highlight{background:linear-gradient(90deg,#c084fc33,#7c3aed22); padding:3px 6px; border-radius:6px; font-weight:700;}
+  .step{background:white; padding:8px; border-radius:8px; margin:8px 0; border:1px solid #f0e6ff; font-size:13px; color:#241a3a}
+  pre{white-space:pre-wrap; margin:0; font-family:inherit; font-size:13px}
+  .muted{color:#5c3b7a; font-size:13px}
+  .hint{font-size:12px;color:#6b4f9c}
+  .two-col{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  footer{margin-top:12px; font-size:12px; color:#5a3b80}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Advanced Number System Simulator</h1>
+    <div class="muted">Choose operation, enter inputs (signed numbers allowed with a leading '-') and pick the result base. Steps will adapt to the selected base.</div>
+
+    <div class="row" style="margin-top:16px">
+      <div class="left">
+        <label>Operation</label>
+        <select id="operationType" onchange="renderInputs()">
+          <option value="conversion">Conversion</option>
+          <option value="complement">1's / 2's Complement</option>
+          <option value="addition">Addition</option>
+          <option value="subtraction">Subtraction</option>
+          <option value="multiplication">Multiplication</option>
+          <option value="division">Division</option>
+        </select>
+      </div>
+
+      <div class="small">
+        <label>Result Base</label>
+        <select id="resultBase">
+          <option value="decimal">Decimal</option>
+          <option value="binary">Binary</option>
+          <option value="octal">Octal</option>
+          <option value="hexadecimal">Hexadecimal</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="inputsArea"></div>
+
+    <div style="display:flex; gap:10px; margin-top:10px;">
+      <button onclick="run()">Calculate</button>
+      <button onclick="copyResult()" style="background:#a78bfa;color:#2b076e">Copy Result</button>
+      <div style="flex:1"></div>
+      <div class="hint">Tip: use leading '-' for negative inputs (signed).</div>
+    </div>
+
+    <div id="results" class="results" aria-live="polite"></div>
+
+    <footer>Built for classroom clarity — shows base-specific step-by-step conversions and binary column steps when result is binary.</footer>
+  </div>
+
+<script>
+/* ======= Utilities for parsing/conversion with steps ======= */
+
+/* parse input string in specified base to signed integer (allow leading '-') */
+function parseToDecimal(inputStr, base){
+  if(typeof inputStr !== 'string') inputStr = String(inputStr);
+  inputStr = inputStr.trim();
+  if(inputStr.length===0) throw "Empty input";
+  let negative = false;
+  if(inputStr.startsWith('-')){ negative = true; inputStr = inputStr.slice(1); if(inputStr.length===0) throw "Invalid number"; }
+  let val;
+  if(base==='decimal'){ if(!/^[0-9]+$/.test(inputStr)) throw "Invalid decimal"; val = parseInt(inputStr,10); }
+  else if(base==='binary'){ if(!/^[01]+$/.test(inputStr)) throw "Invalid binary"; val = parseInt(inputStr,2); }
+  else if(base==='octal'){ if(!/^[0-7]+$/.test(inputStr)) throw "Invalid octal"; val = parseInt(inputStr,8); }
+  else if(base==='hexadecimal'){ if(!/^[0-9a-fA-F]+$/.test(inputStr)) throw "Invalid hex"; val = parseInt(inputStr,16); }
+  return negative ? -val : val;
+}
+
+/* produce steps converting decimal -> base (division method) */
+function decimalToBaseSteps(decimal, baseName){
+  const hexMap='0123456789ABCDEF';
+  if(decimal===0) return {repr:'0', steps:[`Decimal is 0 → ${baseName.toUpperCase()} is 0`]};
+  let neg = decimal < 0;
+  let n = Math.abs(decimal);
+  let base = baseName==='binary'?2: baseName==='octal'?8: baseName==='hexadecimal'?16:10;
+  let steps = [];
+  let digits = '';
+  while(n>0){
+    let q = Math.floor(n/base);
+    let r = n % base;
+    steps.push(`${n} ÷ ${base} = ${q} remainder ${hexMap[r]}`);
+    digits = hexMap[r] + digits;
+    n = q;
+  }
+  if(neg) digits = '-' + digits;
+  return { repr: digits, steps: steps };
+}
+
+/* steps converting any input base -> decimal (expansion method) */
+function baseToDecimalSteps(inputStr, baseName){
+  let hexMap='0123456789ABCDEF';
+  inputStr = inputStr.trim();
+  let negative=false;
+  if(inputStr.startsWith('-')) {negative = true; inputStr=inputStr.slice(1);}
+  let base = baseName==='binary'?2: baseName==='octal'?8: baseName==='hexadecimal'?16:10;
+  let steps=[];
+  let dec=0;
+  let len = inputStr.length;
+  for(let i=0;i<len;i++){
+    let ch = inputStr[i];
+    let val = hexMap.indexOf(ch.toUpperCase());
+    if(val<0 || val >= base) throw `Invalid digit '${ch}' for base ${base}`;
+    let power = len-1-i;
+    let term = val * Math.pow(base, power);
+    steps.push(`${val} × ${base}^${power} = ${term}`);
+    dec += term;
+  }
+  if(negative) dec = -dec;
+  return {decimal:dec, steps:steps};
+}
+
+/* produce binary column addition steps (bitwise with carries), inputs are binary strings, supports sign-bit handling if negative is indicated by '-' */
+function binaryColumnAddSteps(binA, binB){
+  // both are pure binary strings (no leading sign)
+  let a = binA.slice();
+  let b = binB.slice();
+  let n = Math.max(a.length, b.length);
+  a = a.padStart(n,'0'); b = b.padStart(n,'0');
+  let carry = 0;
+  let result = '';
+  let steps = [];
+  for(let i=n-1;i>=0;i--){
+    let bitA = parseInt(a[i]);
+    let bitB = parseInt(b[i]);
+    let sum = bitA + bitB + carry;
+    let out = sum % 2;
+    steps.unshift(`bit ${i}: ${bitA} + ${bitB} + carry ${carry} -> ${out} (new carry ${Math.floor(sum/2)})`);
+    result = out + result;
+    carry = Math.floor(sum/2);
+  }
+  if(carry) { steps.unshift(`final carry: ${carry} added as MSB`); result = '1' + result; }
+  return {result, steps};
+}
+
+/* binary subtraction via borrow (A - B assuming A >= B and both positive binary strings) */
+function binaryColumnSubSteps(binA, binB){
+  let a = binA.slice();
+  let b = binB.slice();
+  let n = Math.max(a.length, b.length);
+  a = a.padStart(n,'0'); b = b.padStart(n,'0');
+  let result = '';
+  let steps = [];
+  let borrow = 0;
+  for(let i=n-1;i>=0;i--){
+    let ai = parseInt(a[i]) - borrow;
+    let bi = parseInt(b[i]);
+    if(ai < bi){
+      ai += 2;
+      borrow = 1;
+      result = (ai - bi) + result;
+      steps.unshift(`bit ${i}: (${a[i]} - borrow 1) -> ${ai} ; ${ai} - ${b[i]} = ${ai - bi} (borrow 1)`);
+    } else {
+      result = (ai - bi) + result;
+      steps.unshift(`bit ${i}: (${a[i]} - borrow ${borrow}) -> ${ai} ; ${ai} - ${b[i]} = ${ai - bi} (borrow 0)`);
+      borrow = 0;
+    }
+  }
+  // trim leading zeros
+  result = result.replace(/^0+/, '') || '0';
+  if(borrow) steps.unshift(`final borrow: ${borrow} (indicates negative result in unsigned arithmetic)`);
+  return {result, steps};
+}
+
+/* convert integer to signed two's complement binary string with chosen width */
+function toTwosComplementStr(value, width){
+  if(width < 1) width = 1;
+  if(value >= 0){
+    let s = Math.abs(value).toString(2).padStart(width,'0');
+    if(s.length>width) s = s.slice(-width); // truncate if overflow
+    return s;
+  } else {
+    // compute two's complement of abs(value) within width bits
+    let pos = Math.abs(value);
+    if(pos >= Math.pow(2, width-1)){
+      // overflow but still return lowest width bits
+    }
+    let mod = ( (Math.pow(2,width) + value) >>> 0 ); // value negative
+    let s = mod.toString(2).padStart(width,'0');
+    if(s.length>width) s = s.slice(-width);
+    return s;
+  }
+}
+
+/* helper formatting */
+function block(title, bodyHtml){
+  return `<div class="step"><strong>${title}</strong><div style="margin-top:6px"><pre>${bodyHtml}</pre></div></div>`;
+}
+
+/* ======= UI rendering & main logic ======= */
+
+function renderInputs(){
+  const op = document.getElementById('operationType').value;
+  const area = document.getElementById('inputsArea');
+  let html = '';
+  if(op === 'conversion'){
+    html = `
+      <div class="two-col">
+        <div>
+          <label>Input Base</label>
+          <select id="inBase"><option value="decimal">Decimal</option><option value="binary">Binary</option><option value="octal">Octal</option><option value="hexadecimal">Hexadecimal</option></select>
+        </div>
+        <div>
+          <label>Convert To</label>
+          <select id="toBase"><option value="decimal">Decimal</option><option value="binary">Binary</option><option value="octal">Octal</option><option value="hexadecimal">Hexadecimal</option></select>
+        </div>
+      </div>
+      <div style="margin-top:8px"><label>Number</label><input id="singleInput" type="text" placeholder="e.g. 45 or 101101 or 2A (hex)"></div>
+    `;
+  } else if(op === 'complement'){
+    html = `
+      <div class="two-col">
+        <div><label>Input Base (will be converted to binary for complement)</label>
+            <select id="inBase"><option value="binary">Binary</option><option value="decimal">Decimal</option><option value="octal">Octal</option><option value="hexadecimal">Hexadecimal</option></select>
+        </div>
+        <div><label>Complement Type</label>
+            <select id="compType"><option value="ones">1's Complement</option><option value="twos">2's Complement</option></select>
+        </div>
+      </div>
+      <div style="margin-top:8px"><label>Number</label><input id="singleInput" type="text" placeholder="Enter number (if not binary, it will convert first)"></div>
+    `;
+  } else {
+    // arithmetic: two numbers and base selection (binary/decimal/oct/hex allowed; we will operate in decimal internally)
+    html = `
+      <div class="two-col">
+        <div>
+          <label>First Number</label>
+          <input id="numA" type="text" placeholder="e.g. 13 or 1101 or -5">
+        </div>
+        <div>
+          <label>Second Number</label>
+          <input id="numB" type="text" placeholder="e.g. 7 or 1011 or -3">
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <label>Input Base for both numbers</label>
+        <select id="arithBase"><option value="decimal">Decimal</option><option value="binary">Binary</option><option value="octal">Octal</option><option value="hexadecimal">Hexadecimal</option></select>
+      </div>
+    `;
+  }
+  area.innerHTML = html;
+}
+
+function run(){
+  const op = document.getElementById('operationType').value;
+  const resultBase = document.getElementById('resultBase').value;
+  const out = document.getElementById('results');
+  out.innerHTML = '';
+  try{
+    if(op === 'conversion'){
+      const inBase = document.getElementById('inBase').value;
+      const toBase = document.getElementById('toBase').value;
+      const s = document.getElementById('singleInput').value.trim();
+      if(!s) throw "Please enter a number";
+      // convert input -> decimal with steps
+      const baseToDec = baseToDecimalSteps(s, inBase);
+      // convert decimal -> target base with steps
+      const dec = baseToDec.decimal;
+      const decToTarget = decimalToBaseSteps(dec, toBase);
+      let html = '';
+      html += block(`Step 1 — Convert ${inBase} → decimal`, baseToDec.steps.join('\n'));
+      html += block(`Decimal intermediate`, `${dec}`);
+      html += block(`Step 2 — Convert decimal → ${toBase}`, decToTarget.steps.join('\n'));
+      html += `<div class="step"><strong>Result (${toBase}):</strong> <span class="highlight">${decToTarget.repr}</span></div>`;
+      out.innerHTML = html;
+    }
+    else if(op === 'complement'){
+      const inBase = document.getElementById('inBase').value;
+      const compType = document.getElementById('compType').value; // 'ones' or 'twos'
+      const s = document.getElementById('singleInput').value.trim();
+      if(!s) throw "Please enter a number";
+      // Convert input to binary (if needed) — show steps converting input base -> decimal -> binary
+      const baseToDec = baseToDecimalSteps(s, inBase);
+      const dec = baseToDec.decimal;
+      // choose width: minimal width that fits value magnitude + 1 sign bit (if negative) or at least 4 bits
+      let absDec = Math.abs(dec);
+      let width = Math.max( Math.ceil(Math.log2(Math.max(1, absDec+1))) + 1, 4 );
+      // If decimal is positive we will convert dec to unsigned binary with width bits; if negative convert to two's complement with width
+      let binStr = (dec < 0) ? toTwosComplementStr(dec, width) : Math.abs(dec).toString(2).padStart(width,'0');
+      // Now compute complements on binStr (for ones & twos)
+      const ones = (function(bin){ let steps=[]; let out=''; for(let i=0;i<bin.length;i++){ let f = bin[i]==='0'?'1':'0'; steps.push(`${bin[i]} → ${f}`); out += f;} return {res:out, steps};})(binStr);
+      const twos = (function(bin){
+        let onesRes = ones.res;
+        // add 1 with binary column
+        let carry = 1;
+        let r = '';
+        let stepLines = [];
+        for(let i=bin.length-1;i>=0;i--){
+          let sum = parseInt(onesRes[i]) + carry;
+          let outBit = sum % 2;
+          stepLines.unshift(`index ${i}: ${onesRes[i]} + carry ${carry} => ${outBit} (new carry ${Math.floor(sum/2)})`);
+          r = outBit + r;
+          carry = Math.floor(sum/2);
+        }
+        if(carry) { r = '1' + r; stepLines.unshift(`final carry: ${carry}, result extended`); }
+        return {res:r, steps: stepLines};
+      })(binStr);
+      let chosen = compType === 'ones' ? ones : twos;
+      // Also convert the resulting binary complement into the selected resultBase
+      // interpret chosen.res as unsigned binary -> decimal -> convert to resultBase
+      let compDec = parseInt(chosen.res, 2);
+      const decToTarget = decimalToBaseSteps(compDec, resultBase);
+      let html = '';
+      html += block(`Step A — Convert input (${inBase}) → decimal`, baseToDec.steps.join('\n') + `\nDecimal intermediate: ${dec}`);
+      html += block(`Step B — Represent as binary (width = ${width} bits)`, `binary representation used: ${binStr}`);
+      html += block(`Step C — Compute ${compType==='ones'?"1's":"2's"} complement (bitwise)`, chosen.steps.join('\n'));
+      html += block(`Step D — Interpret complement as unsigned binary → decimal`, `${chosen.res}₂ = ${compDec}₁₀`);
+      html += block(`Step E — Convert decimal ${compDec} → ${resultBase}`, decToTarget.steps.join('\n'));
+      html += `<div class="step"><strong>Complement result (${resultBase}):</strong> <span class="highlight">${decToTarget.repr}</span></div>`;
+      out.innerHTML = html;
+    }
+    else {
+      // arithmetic
+      const base = document.getElementById('arithBase') ? document.getElementById('arithBase').value : document.getElementById('arithBase')?.value;
+      const inBase = document.getElementById('arithBase') ? document.getElementById('arithBase').value : 'decimal';
+      const aStr = document.getElementById('numA').value.trim();
+      const bStr = document.getElementById('numB').value.trim();
+      if(aStr.length===0 || bStr.length===0) throw 'Enter both operands';
+      // parse to decimal
+      const aDec = baseToDecimalSteps(aStr, inBase).decimal;
+      const bDec = baseToDecimalSteps(bStr, inBase).decimal;
+      let op = document.getElementById('operationType').value;
+      // perform operation in decimal to get exact result
+      let html = '';
+      if(op === 'addition' || op==='subtraction' || op==='multiplication' || op==='division'){
+        // provide decimal intermediate steps summary
+        html += block('Step 1 — Convert inputs to decimal',
+          `A: ${aStr} (${inBase}) → ${aDec}\nB: ${bStr} (${inBase}) → ${bDec}`);
+        // perform actual op
+        let opName = op;
+        if(op==='addition'){ var resultDec = aDec + bDec; html += block('Step 2 — Decimal operation', `${aDec} + ${bDec} = ${resultDec}`); }
+        else if(op==='subtraction'){ var resultDec = aDec - bDec; html += block('Step 2 — Decimal operation', `${aDec} - ${bDec} = ${resultDec}`); }
+        else if(op==='multiplication'){ var resultDec = aDec * bDec; html += block('Step 2 — Decimal operation', `${aDec} × ${bDec} = ${resultDec}`); }
+        else if(op==='division'){
+          if(bDec === 0) throw 'Division by zero';
+          var quo = Math.floor(aDec / bDec);
+          var rem = aDec % bDec;
+          html += block('Step 2 — Decimal operation', `${aDec} ÷ ${bDec} = Quotient ${quo}, Remainder ${rem}`);
+          // show conversions of both quotient & remainder into result base
+          const qConv = decimalToBaseSteps(quo, resultBase);
+          const rConv = decimalToBaseSteps(rem, resultBase);
+          html += `<div class="step"><strong>Quotient (${resultBase}):</strong> <span class="highlight">${qConv.repr}</span>\n<strong>Remainder (${resultBase}):</strong> <span class="highlight">${rConv.repr}</span></div>`;
+          out.innerHTML = html; return;
+        }
+
+        // Now: show steps according to chosen resultBase
+        if(resultBase === 'binary'){
+          // Show binary column arithmetic steps when possible
+          // Convert operands to two's complement binary strings of equal width
+          let absA = Math.abs(aDec), absB = Math.abs(bDec);
+          // bit width: enough bits to represent signs and result
+          let width = Math.max( Math.ceil(Math.log2(Math.max(1, Math.abs(resultDec)+1))) + 1,
+                                Math.ceil(Math.log2(Math.max(1, absA+1))) + 1,
+                                Math.ceil(Math.log2(Math.max(1, absB+1))) + 1, 4);
+          // get two's complement strings for signed representation
+          let aBin = toTwosComplementStr(aDec, width);
+          let bBin = toTwosComplementStr(bDec, width);
+          if(op === 'addition'){
+            const col = binaryColumnAddSteps(aBin.startsWith('-')?aBin.slice(1):aBin, bBin.startsWith('-')?bBin.slice(1):bBin);
+            html += block('Step 3 — Represent operands in two\'s complement (width = '+width+' bits)',
+              `A (${aDec}): ${aBin}\nB (${bDec}): ${bBin}`);
+            html += block('Step 4 — Binary column addition (bit-by-bit with carries)', col.steps.join('\n'));
+            html += `<div class="step"><strong>Binary result (two's complement):</strong> <span class="highlight">${col.result}</span>\n<strong>Decimal result:</strong> ${resultDec}</div>`;
+          } else if(op === 'subtraction'){
+            // A - B; compute A + (two's complement of B)
+            let bTwos = toTwosComplementStr(-bDec, width); // -bDec two's comp equals two's complement of b
+            const col = binaryColumnAddSteps(aBin, bTwos);
+            html += block('Step 3 — operands (two\'s complement representation):', `A: ${aBin}\nB: ${bBin}\nTwo\'s complement of B (for subtraction): ${bTwos}`);
+            html += block('Step 4 — Binary column addition A + (two\'s complement B)', col.steps.join('\n'));
+            html += `<div class="step"><strong>Binary result (two's complement):</strong> <span class="highlight">${col.result}</span>\n<strong>Decimal result:</strong> ${resultDec}</div>`;
+          } else if(op === 'multiplication'){
+            // Show simple shift-add multiplication steps in binary (positive absolute values for demonstration)
+            // We'll show multiplicand, multiplier, and partial products (use absolute values then adjust sign)
+            let m1 = Math.abs(aDec), m2 = Math.abs(bDec);
+            let m1b = m1.toString(2), m2b = m2.toString(2);
+            let partials = [];
+            for(let i=m2b.length-1;i>=0;i--){
+              let bit = m2b[i];
+              if(bit === '1') partials.push(m1b + ' << ' + (m2b.length-1 - i) + ' = ' + (m1 << (m2b.length-1 - i)).toString(2));
+              else partials.push('(0) << ' + (m2b.length-1 - i) + ' = 0');
+            }
+            html += block('Step 3 — Binary multiplicand & multiplier', `A: ${aDec} -> ${aDec.toString(2)}\nB: ${bDec} -> ${bDec.toString(2)}`);
+            html += block('Step 4 — Partial products (shift & add)', partials.join('\n'));
+            html += `<div class="step"><strong>Binary result:</strong> <span class="highlight">${(Math.abs(resultDec)).toString(2)}</span>\n<strong>Decimal result:</strong> ${resultDec}</div>`;
+          }
+          // done
+          out.innerHTML = html;
+        } else {
+          // For decimal / octal / hex: show decimal op + conversion to chosen base with detailed division steps
+          const conv = decimalToBaseSteps(resultDec, resultBase);
+          html += block(`Step 3 — Convert decimal result ${resultDec} → ${resultBase}`, conv.steps.join('\n'));
+          html += `<div class="step"><strong>Result (${resultBase}):</strong> <span class="highlight">${conv.repr}</span></div>`;
+          out.innerHTML = html;
+        }
+      } // end op handling
+    } // end arithmetic branch
+  } catch(e){
+    out.innerHTML = `<div class="step" style="color:#7a0d80"><strong>Error:</strong> ${e}</div>`;
+  }
+}
+
+function copyResult(){
+  const res = document.getElementById('results').innerText;
+  navigator.clipboard?.writeText ? navigator.clipboard.writeText(res) : alert('Copy not supported');
+}
+
+/* initial render */
+renderInputs();
+
+</script>
+</body>
+</html>
+
+
